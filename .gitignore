@@ -1,0 +1,5 @@
+.vscode/**
+build/**
+*.exe
+*.kra
+*~
