@@ -291,11 +291,8 @@ main(int32_t argc, char **argv)
   msh_mat4_t mvp = msh_mat4_mul(cam.proj, cam.view);
 
 
-  glDisable( GL_BLEND );
-  // glBlendEquation(GL_FUNC_ADD);
-  // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-  glDisable( GL_DEPTH_TEST );
+ 
+  // glDisable( GL_DEPTH_TEST );
   while (!glfwWindowShouldClose(window))
   {
     // Update the camera
@@ -310,13 +307,22 @@ main(int32_t argc, char **argv)
       glfwGetFramebufferSize( window, &fb_w, &fb_h );
     }
     
+
+    
     glBindFramebuffer( GL_FRAMEBUFFER, oit_fbo );
     glViewport( 0, 0, 1024, 720 );
-
+    glEnable( GL_BLEND );
+    
     static const float clear_accum[] = { 0, 0, 0, 0 };
     glClearBufferfv(GL_COLOR, 0, clear_accum);
-    static const float clear_reveal[] = { 0, 0, 0, 0 };
+    glBlendEquationi(0, GL_FUNC_ADD);
+    glBlendFunci( 0, GL_ONE, GL_ONE );
+
+    static const float clear_reveal[] = { 1, 0, 0, 0 };
     glClearBufferfv(GL_COLOR, 1, clear_reveal);
+    glBlendEquationi(1, GL_FUNC_ADD);
+    glBlendFunci( 0, GL_ZERO, GL_ONE_MINUS_SRC_COLOR );
+
 
     glUseProgram( transparency_program_id );
     glUniformMatrix4fv( 0, 1, GL_FALSE, &mvp.data[0] );
@@ -324,7 +330,11 @@ main(int32_t argc, char **argv)
     glBindVertexArray( quads_vao );
     glDrawElements( GL_TRIANGLES, 18, GL_UNSIGNED_SHORT, NULL );
 
+
+
+
     glBindFramebuffer( GL_FRAMEBUFFER, 0 );
+    glDisable( GL_BLEND );
     glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glViewport(0, 0, window_width, window_height);
