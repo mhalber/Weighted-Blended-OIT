@@ -11,11 +11,11 @@ A simple, single-file, OpenGL implementation of
 by Morgan McGuire and Louis Bavoil.
 
 
-This small demo allows user to switch between OIT rendering and the fixed order rendering - rotating the scene around allows one to appreciate the order independent nature of the implemented technique. 
+This small demo allows the user to switch between OIT rendering and the fixed order rendering - rotating the scene around allows one to appreciate the order-independent nature of the implemented technique. 
 
-It is also possible to visualize different textures generated during OIT rendering.
+It is also possible to visualize different textures generated during the OIT rendering.
 
-Lastly, by default the transparency shader uses Equation 9 from the original paper, but one can also edit source code to switch to exponential function with coefficients fit to best resemble the fixed order blend at the initial camera distance. Check 'transparency_fs_src' variable that stores the respective shader code.
+Lastly, by default, the transparency shader uses Equation 9 from the original paper, but one can also edit source code to switch to exponential function with coefficients fit to best resemble the fixed order blend at the initial camera distance. Check the 'transparency_fs_src' variable that stores the respective shader code.
 
 ## Keybindings
 
