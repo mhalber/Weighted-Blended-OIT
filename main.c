@@ -23,8 +23,11 @@ typedef struct mouse_state
   float scroll;
 } mouse_state_t;
 
-static bool oit_active = true;
 static mouse_state_t mouse = {0};
+static bool oit_active = true;
+static int oit_visualization_mode = 1;
+static char* render_mode_strings[] = { "Weighted, Blended OIT", "Fixed order" };
+static char* oit_visualization_strings[] = { "Final Framebuffer", "Accumulation Texture", "Revealage Texture" };
 
 void scroll_callback( GLFWwindow* window, double xoffset, double yoffset )
 {
@@ -52,10 +55,25 @@ void mouse_button_callback( GLFWwindow* window, int button, int action, int mods
 
 void key_callback( GLFWwindow* window, int key, int scancode, int action, int mods )
 {
-  if( key == GLFW_KEY_SPACE && action == GLFW_PRESS ) 
+  if( action == GLFW_PRESS )
   {
-    oit_active = !oit_active;
-    printf("TEST %d\n", (int)oit_active);
+    switch( key )
+    {
+      case GLFW_KEY_SPACE:
+        oit_active = !oit_active;
+        break;
+      case GLFW_KEY_1:
+        oit_visualization_mode = 1;
+        break;
+      case GLFW_KEY_2:
+        oit_visualization_mode = 2;
+        break;
+      case GLFW_KEY_3:
+        oit_visualization_mode = 3;
+        break;
+      default:
+        break;
+    }
   }
 }
 
@@ -103,9 +121,8 @@ main(int32_t argc, char **argv)
     glEnable( GL_DEBUG_OUTPUT );
     glEnable( GL_DEBUG_OUTPUT_SYNCHRONOUS );
     glDebugMessageCallback( gl_utils_debug_msg_call_back, NULL );
-    // glDebugMessageControl( GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_FALSE );
-    // Turn errors on.
-    // glDebugMessageControl( GL_DONT_CARE, GL_DEBUG_TYPE_ERROR, GL_DONT_CARE, 0, NULL, GL_TRUE ); 
+    glDebugMessageControl( GL_DONT_CARE, GL_DONT_CARE, GL_DONT_CARE, 0, NULL, GL_FALSE );
+    glDebugMessageControl( GL_DONT_CARE, GL_DEBUG_TYPE_ERROR, GL_DONT_CARE, 0, NULL, GL_TRUE ); 
   }
 
 /////// Full screen present shader
@@ -129,19 +146,27 @@ main(int32_t argc, char **argv)
     (
       layout(location = 0) uniform sampler2D accum_tex;
       layout(location = 1) uniform sampler2D reveal_tex;
+      layout(location = 2) uniform int oit_visualization_mode;
       out vec4 frag_col;
       in vec2 v_uv;
       void main() 
       {
-        // float val = texture( reveal_tex, v_uv ).r;
-        // frag_col = vec4( val, val, val, 1.0 );
-        // frag_col = vec4( texture( accum_tex, v_uv ).rgb, 1.0);
-
         float revealage = texture( reveal_tex, v_uv ).r;
-        if (revealage == 1.0) { discard; }
-        vec4 accum = texture( accum_tex, v_uv );
-        vec3 avg_col = accum.rgb / clamp( accum.a, 1e-6, 5e4 );
-        frag_col = vec4( avg_col, 1.0 - revealage );
+        vec4 accum = texture( accum_tex, v_uv );  
+        if( oit_visualization_mode == 2 )
+        {
+          frag_col = vec4( accum.rgb, 0.0 );
+        }
+        else if( oit_visualization_mode == 3 )
+        {
+          frag_col = vec4( 1.0 - revealage );
+        }
+        else
+        {
+          if (revealage == 1.0) { discard; }
+          vec3 avg_col = accum.rgb / clamp( accum.a, 1e-3, 5e4 );
+          frag_col = vec4( avg_col, revealage );
+        }
       }
     );
   
@@ -176,12 +201,16 @@ main(int32_t argc, char **argv)
     (
       layout( location = 0 ) in vec3 pos;
       layout( location = 1 ) in vec4 col;
+      layout( location = 2 ) in vec2 uv;
 
       layout( location = 0 ) uniform mat4 mvp;
+      layout( location = 1 ) uniform mat4 view;
       out vec4 v_col;
+      out vec2 v_uv;
       void main()
       {
         v_col = col;
+        v_uv = uv;
         gl_Position = mvp * vec4( pos, 1.0 );
       }
     );
@@ -191,17 +220,34 @@ main(int32_t argc, char **argv)
     GL_UTILS_SHDR_SOURCE
     (
       in vec4 v_col; \n
+      in vec2 v_uv; \n
       layout( location = 0 ) out vec4 accum; \n
       layout( location = 1 ) out float revelage; \n
       void main() \n
       {
-        // Modified Equation 9 - factor changed to 1.0/2.0 from 1.0/200.0
-        float factor = 1.0/2.0; 
-        float depth = factor * abs(1.0/gl_FragCoord.w);
-        float weight = v_col.a * clamp( (0.03 / (1e-5 + pow(depth, 4.0) ) ), 1e-6, 3e3 );
-        accum = vec4( v_col.rgb, 1.0 ) * weight;
-        revelage = v_col.a;
-      }
+        float dist = sqrt( v_uv.x * v_uv.x + v_uv.y * v_uv.y );
+        vec4 out_col = v_col;
+        out_col.a *= (1.0 - smoothstep(0.85, 1.0, dist) );
+
+        float csz = abs(1.0 / gl_FragCoord.w);
+
+#if 1
+        // Equation 9
+        float factor = 1.0/200.0; 
+        float z = factor * csz;
+        float weight = clamp( (0.03 / (1e-5 + pow(z, 4.0) ) ), 1e-4, 3e3 );
+#else
+        // Exponential function with coefficents fit to better resemple fixed order.
+        // Sensitve to changes in depth
+        float a = 58.3765228;
+        float b = 1.45434782;
+        float c = 0.00630901288;
+        float fz = a * exp(-b*csz) + c;
+        float weight = clamp(fz, 1e-2, 3e3);
+#endif
+        accum = vec4( out_col.rgb * out_col.a, out_col.a ) * weight;
+        revelage = out_col.a;
+      } 
     );
   
   GLuint transparency_vertex_shader = glCreateShader( GL_VERTEX_SHADER );
@@ -235,12 +281,15 @@ main(int32_t argc, char **argv)
     (
       layout( location = 0 ) in vec3 pos;
       layout( location = 1 ) in vec4 col;
+      layout( location = 2 ) in vec2 uv;
 
       layout( location = 0 ) uniform mat4 mvp;
       out vec4 v_col;
+      out vec2 v_uv;
       void main()
       {
         v_col = col;
+        v_uv = uv;
         gl_Position = mvp * vec4( pos, 1.0 );
       }
     );
@@ -250,10 +299,13 @@ main(int32_t argc, char **argv)
     GL_UTILS_SHDR_SOURCE
     (
       in vec4 v_col; \n
+      in vec2 v_uv; \n
       out vec4 frag_col; \n
       void main() \n
       {
+        float dist = sqrt( v_uv.x * v_uv.x + v_uv.y * v_uv.y );
         frag_col = v_col;
+        frag_col.a *= (1.0 - smoothstep(0.85, 1.0, dist) );
       }
     );
   
@@ -306,20 +358,20 @@ main(int32_t argc, char **argv)
 /////// Transparent quads geometry setup 
   float quads_verts[] = 
   {
-    -1.0, -1.0,  0.0,   0.0, 0.0, 1.0, 0.75,
-    -1.0,  1.0,  0.0,   0.0, 0.0, 1.0, 0.75,
-     1.0,  1.0,  0.0,   0.0, 0.0, 1.0, 0.75,
-     1.0, -1.0,  0.0,   0.0, 0.0, 1.0, 0.75,
+    -1.0, -1.0,  0.0,   0.0, 0.0, 1.0, 0.75,   -1.0, -1.0,
+    -1.0,  1.0,  0.0,   0.0, 0.0, 1.0, 0.75,   -1.0,  1.0,
+     1.0,  1.0,  0.0,   0.0, 0.0, 1.0, 0.75,    1.0,  1.0,
+     1.0, -1.0,  0.0,   0.0, 0.0, 1.0, 0.75,    1.0, -1.0,
 
-    -1.0, -1.0, -2.0,   1.0, 0.0, 0.0, 0.75,
-    -1.0,  1.0, -2.0,   1.0, 0.0, 0.0, 0.75,
-     1.0,  1.0, -2.0,   1.0, 0.0, 0.0, 0.75,
-     1.0, -1.0, -2.0,   1.0, 0.0, 0.0, 0.75,
+    -1.0, -1.0, -2.0,   1.0, 0.0, 0.0, 0.75,   -1.0, -1.0,
+    -1.0,  1.0, -2.0,   1.0, 0.0, 0.0, 0.75,   -1.0,  1.0,
+     1.0,  1.0, -2.0,   1.0, 0.0, 0.0, 0.75,    1.0,  1.0,
+     1.0, -1.0, -2.0,   1.0, 0.0, 0.0, 0.75,    1.0, -1.0,
 
-    -1.0, -1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,
-    -1.0,  1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,
-     1.0,  1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,
-     1.0, -1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,
+    -1.0, -1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,   -1.0, -1.0,
+    -1.0,  1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,   -1.0,  1.0,
+     1.0,  1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,    1.0,  1.0,
+     1.0, -1.0,  -1.0,   1.0, 1.0, 0.0, 0.75,    1.0, -1.0,
   };
 
   uint16_t quads_ind[] = { 0, 1, 2,  0, 2, 3,
@@ -335,28 +387,34 @@ main(int32_t argc, char **argv)
   glNamedBufferData( quads_vbo, sizeof(quads_verts), quads_verts, GL_STATIC_DRAW );
   glNamedBufferData( quads_ebo, sizeof(quads_ind), quads_ind, GL_STATIC_DRAW );
 
-  glVertexArrayVertexBuffer( quads_oit_vao, binding_idx, quads_vbo, 0, 7 * sizeof( float ) );
+  glVertexArrayVertexBuffer( quads_oit_vao, binding_idx, quads_vbo, 0, 9 * sizeof( float ) );
   glVertexArrayElementBuffer( quads_oit_vao, quads_ebo );
 
   glEnableVertexArrayAttrib( quads_oit_vao, 0 );
   glEnableVertexArrayAttrib( quads_oit_vao, 1 );
+  glEnableVertexArrayAttrib( quads_oit_vao, 2 );
 
   glVertexArrayAttribFormat( quads_oit_vao, 0, 3, GL_FLOAT, GL_FALSE, 0 );
   glVertexArrayAttribFormat( quads_oit_vao, 1, 4, GL_FLOAT, GL_FALSE, 3 * sizeof(float) );
+  glVertexArrayAttribFormat( quads_oit_vao, 2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float) );
 
   glVertexArrayAttribBinding( quads_oit_vao, 0, binding_idx );
   glVertexArrayAttribBinding( quads_oit_vao, 1, binding_idx );
+  glVertexArrayAttribBinding( quads_oit_vao, 2, binding_idx );
 
-  glVertexArrayVertexBuffer( quads_vao, binding_idx, quads_vbo, 0, 7 * sizeof( float ) );
+  glVertexArrayVertexBuffer( quads_vao, binding_idx, quads_vbo, 0, 9 * sizeof( float ) );
 
   glEnableVertexArrayAttrib( quads_vao, 0 );
   glEnableVertexArrayAttrib( quads_vao, 1 );
+  glEnableVertexArrayAttrib( quads_vao, 2 );
 
   glVertexArrayAttribFormat( quads_vao, 0, 3, GL_FLOAT, GL_FALSE, 0 );
   glVertexArrayAttribFormat( quads_vao, 1, 4, GL_FLOAT, GL_FALSE, 3 * sizeof(float) );
+  glVertexArrayAttribFormat( quads_vao, 2, 2, GL_FLOAT, GL_FALSE, 7 * sizeof(float) );
 
   glVertexArrayAttribBinding( quads_vao, 0, binding_idx );
   glVertexArrayAttribBinding( quads_vao, 1, binding_idx );
+  glVertexArrayAttribBinding( quads_vao, 2, binding_idx );
 
 //////// Framebuffer setup
   uint32_t oit_fbo_width = 1024;
@@ -367,14 +425,14 @@ main(int32_t argc, char **argv)
 
   glGenTextures(1, &accum_texture);
   glBindTexture(GL_TEXTURE_2D, accum_texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, oit_fbo_width, oit_fbo_height, 0, GL_RGBA, GL_HALF_FLOAT, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, oit_fbo_width, oit_fbo_height, 0, GL_RGBA, GL_FLOAT, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, accum_texture, 0);
 
   glGenTextures(1, &reveal_texture);
   glBindTexture(GL_TEXTURE_2D, reveal_texture);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, oit_fbo_width, oit_fbo_height, 0, GL_RED, GL_HALF_FLOAT, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_R16F, oit_fbo_width, oit_fbo_height, 0, GL_RED, GL_FLOAT, NULL);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, reveal_texture, 0);
@@ -403,8 +461,7 @@ main(int32_t argc, char **argv)
                                              .znear = 0.01f,
                                              .zfar = 500.0f,
                                              .use_ortho = false });
-  msh_mat4_t mvp = msh_mat4_mul(cam.proj, cam.view);
-
+  msh_mat4_t mvp = msh_mat4_mul( cam.proj, cam.view );
 
   glEnable( GL_DEPTH_TEST );
   glEnable( GL_BLEND );
@@ -421,9 +478,16 @@ main(int32_t argc, char **argv)
       int32_t fb_w, fb_h;
       glfwGetFramebufferSize( window, &fb_w, &fb_h );
     }
+
     if( mouse.button[0] == 1 )
     {
       msh_camera_rotate( &cam, mouse.prev_pos, mouse.cur_pos );
+      msh_camera_update_view( &cam );
+    }
+
+    if( mouse.button[1] == 1 )
+    {
+      msh_camera_pan( &cam, mouse.prev_pos, mouse.cur_pos );
       msh_camera_update_view( &cam );
     }
 
@@ -451,7 +515,6 @@ main(int32_t argc, char **argv)
 
       // OIT pass
       glBindFramebuffer( GL_FRAMEBUFFER, oit_fbo );
-      // glClear( GL_DEPTH_BUFFER_BIT );
       glViewport( 0, 0, 1024, 720 );
       glDepthMask( GL_FALSE );
 
@@ -460,7 +523,7 @@ main(int32_t argc, char **argv)
       glBlendEquationi( 0, GL_FUNC_ADD );
       glBlendFunci( 0, GL_ONE, GL_ONE );
 
-      static const float clear_reveal[] = { 1,1,1,1 };
+      static const float clear_reveal[] = { 1, 1, 1, 1 };
       glClearBufferfv( GL_COLOR, 1, clear_reveal );
       glBlendEquationi( 1, GL_FUNC_ADD );
       glBlendFunci( 1, GL_ZERO, GL_ONE_MINUS_SRC_COLOR );
@@ -468,6 +531,7 @@ main(int32_t argc, char **argv)
 
       glUseProgram( transparency_program_id );
       glUniformMatrix4fv( 0, 1, GL_FALSE, &mvp.data[0] );
+      glUniformMatrix4fv( 1, 1, GL_FALSE, &cam.view.data[0] );
 
       glBindVertexArray( quads_oit_vao );
       glDrawElements( GL_TRIANGLES, 18, GL_UNSIGNED_SHORT, NULL );
@@ -479,6 +543,7 @@ main(int32_t argc, char **argv)
       glDepthMask( GL_TRUE );
       glBlendEquation( GL_FUNC_ADD );
       glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
+      glBlendFunc( GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA );
       glViewport(0, 0, window_width, window_height);
 
       glActiveTexture(GL_TEXTURE0);
@@ -490,6 +555,7 @@ main(int32_t argc, char **argv)
       glUseProgram( fullscreen_program_id );
       glUniform1i( 0, 0 ); // Accum  texture
       glUniform1i( 1, 1 ); // Reveal texture
+      glUniform1i( 2, oit_visualization_mode ); // Render mode
       glBindVertexArray( fullscreen_quad_vao );
       glDrawArrays( GL_TRIANGLES, 0, 3 );
     }
@@ -511,6 +577,16 @@ main(int32_t argc, char **argv)
       glDrawElements( GL_TRIANGLES, 6, GL_UNSIGNED_SHORT, quads_ind );
     }
 
+    char buf[1024];
+    if( !oit_active )
+    {
+      snprintf(buf, 1024, "%s\n", render_mode_strings[1] );
+    }
+    else
+    {
+    snprintf(buf, 1024, "%s: %s\n", render_mode_strings[0], oit_visualization_strings[oit_visualization_mode-1] );
+    }
+    glfwSetWindowTitle( window, buf );
     glfwSwapBuffers(window);
     glfwPollEvents();
   }

@@ -169,8 +169,15 @@ msh_camera_zoom( msh_camera_t* cam, float zoom_amount )
   msh_vec3_t zoom_dir = msh_vec3_scalar_div( cam->offset, norm );
   float zoom_mult = cam->zoom_speed * zoom_amount * zoom_factor * zoom_factor;
   msh_vec3_t zoom_vec = msh_vec3_scalar_mul( zoom_dir, zoom_mult );
-
-  cam->offset = msh_vec3_add( cam->offset, zoom_vec );
+  msh_vec3_t new_offset = msh_vec3_add( cam->offset, zoom_vec );
+  // NOTE(maciej): Revisit this logic, possibly change it to a while loop, or rethink how zooming should be done. Essentially we need to prevent cam.offset from becoming 0 magnitude.
+  if( msh_vec3_norm_sq(new_offset) < 0.0001f )
+  {
+    zoom_mult = zoom_mult * 0.5f;
+    zoom_vec = msh_vec3_scalar_mul( zoom_dir, zoom_mult );
+    new_offset = msh_vec3_add( cam->offset, zoom_vec );
+  }
+  cam->offset = new_offset;
 }
 
 void
@@ -277,7 +284,6 @@ msh_camera_update_proj( msh_camera_t * cam )
     float top = 0.85 * cam->zoom_speed * msh_vec3_norm( cam->offset );
     float left = -aspect_ratio * top;
     cam->proj = msh_ortho( left, -left, -top, top, cam->znear, cam->zfar );
-    // cam->proj = msh_ortho( -w/2, w/2, -h/2, h/2,  cam->znear, cam->zfar );
   }
   else
   {
