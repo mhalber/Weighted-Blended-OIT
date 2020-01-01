@@ -2,7 +2,9 @@
 <p align="center">
 <img src='imgs/oit.png'>
 </p>
+
 A simple, single-file, OpenGL implementation of 
+
 
 ["Weighted Blended Order-Independent Transparency"](http://jcgt.org/published/0002/02/09/paper.pdf) 
 
