@@ -2,7 +2,12 @@
 <p align="center">
 <img src='imgs/oit.png'>
 </p>
-A simple, single-file, OpenGL implementation of ["Weighted Blended Order-Independent Transparency"](http://jcgt.org/published/0002/02/09/paper.pdf) by Morgan McGuire and Louis Bavoil.
+A simple, single-file, OpenGL implementation of 
+
+["Weighted Blended Order-Independent Transparency"](http://jcgt.org/published/0002/02/09/paper.pdf) 
+
+by Morgan McGuire and Louis Bavoil.
+
 
 This small demo allows user to switch between OIT rendering and the fixed order rendering - rotating the scene around allows one to appreciate the order independent nature of the implemented technique. 
 
