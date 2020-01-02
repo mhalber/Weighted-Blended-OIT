@@ -17,6 +17,18 @@ It is also possible to visualize different textures generated during the OIT ren
 
 Lastly, by default, the transparency shader uses Equation 9 from the original paper, but one can also edit source code to switch to exponential function with coefficients fit to best resemble the fixed order blend at the initial camera distance. Check the 'transparency_fs_src' variable that stores the respective shader code.
 
+## Building
+
+The project contains a cmake file - depending on your platform you might want to use cmake-gui, or command line,
+In a command line environment with GNU make, you can build the project as:
+
+~~~
+mkdir build
+cd build
+cmake ..
+make
+~~~
+
 ## Keybindings
 
 `space` - switch between OIT and fixed order rendering
